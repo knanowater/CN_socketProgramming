@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Socket Request UI</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            padding: 20px;
+            background-color: #f0f0f0;
+        }
+        .container {
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 20px;
+            background-color: #fff;
+            border: 1px solid #ddd;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .input-group input,
+        .input-group textarea {
+            padding: 10px;
+            margin: 5px auto;
+            width: 50%;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .button-group {
+            text-align: center;
+        }
+        .method-button {
+            padding: 10px 20px;
+            margin: 5px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+            cursor: pointer;
+        }
+        .method-button.active {
+            background-color: #4CAF50;
+            color: #fff;
+        }
+        button.action-btn {
+            padding: 10px 20px;
+            margin: 0 5px;
+            border: none;
+            border-radius: 5px;
+            background-color: #4CAF50;
+            color: #fff;
+            cursor: pointer;
+        }
+        button.action-btn:hover {
+            background-color: #3e8e41;
+        }
+        #response {
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Socket Request UI</h1>
+        </div>
+        <div class="input-group">
+            <!-- target 서버의 ip와 port 입력 -->
+            <input type="text" id="ip" placeholder="Target IP 주소">
+            <input type="text" id="port" placeholder="Target 포트">
+            
+            <!-- 메소드 선택 버튼 (기본 선택 없음) -->
+            <div id="methodButtons" class="button-group">
+                <button class="method-button" onclick="selectMethod('GET')">GET</button>
+                <button class="method-button" onclick="selectMethod('POST')">POST</button>
+                <button class="method-button" onclick="selectMethod('PUT')">PUT</button>
+                <button class="method-button" onclick="selectMethod('HEAD')">HEAD</button>
+            </div>
+            
+            <!-- GET 요청 시 사용할 path 입력 (초기 비활성화) -->
+            <input type="text" id="path" placeholder="요청 Path" disabled>
+            <!-- POST, PUT 요청 시 사용할 body 입력 (초기 비활성화) -->
+            <textarea id="requestBody" placeholder="요청내용" disabled></textarea>
+        </div>
+        <div class="button-group">
+            <button class="action-btn" onclick="sendRequest()">요청 보내기</button>
+        </div>
+        <pre id="response"></pre>
+    </div>
+    <script>
+        let selectedMethod = "";
+        
+        function selectMethod(method) {
+            selectedMethod = method;
+            // 버튼 active 상태 토글
+            const buttons = document.querySelectorAll('.method-button');
+            buttons.forEach(btn => {
+                if(btn.innerText === method){
+                    btn.classList.add('active');
+                } else {
+                    btn.classList.remove('active');
+                }
+            });
+            // 입력 필드 활성화 조정
+            const pathInput = document.getElementById("path");
+            const requestBody = document.getElementById("requestBody");
+            if(method === "GET" || method === "HEAD") {
+                pathInput.disabled = false;
+                requestBody.disabled = true;
+            } else if(method === "POST" || method === "PUT") {
+                pathInput.disabled = true;
+                requestBody.disabled = false;
+            }
+        }
+        
+        async function sendRequest() {
+            if(!selectedMethod) {
+                alert("메소드를 선택해주세요.");
+                return;
+            }
+            const targetIp = document.getElementById('ip').value;
+            const targetPort = document.getElementById('port').value;
+            const method = selectedMethod;
+            // 기본 URL: 웹 서버가 127.0.0.1의 8081 포트에서 동작 중이라고 가정합니다.
+            let url = `http://127.0.0.1:8081/send?target_ip=${encodeURIComponent(targetIp)}&target_port=${encodeURIComponent(targetPort)}`;
+            
+            // GET일 때는 path 값을 쿼리 파라미터로 전달
+            if(method === "GET"){
+                const path = document.getElementById("path").value;
+                url += `&path=${encodeURIComponent(path)}`;
+            }
+            
+            let options = { method };
+            // POST와 PUT 요청인 경우 body를 전달
+            if(method === "POST" || method === "PUT") {
+                const body = document.getElementById("requestBody").value || '';
+                options.body = body;
+                options.headers = { 'Content-Type': 'text/plain' };
+            }
+            
+            try {
+                const res = await fetch(url, options);
+                const text = await res.text();
+                document.getElementById('response').innerText = text;
+            } catch (error) {
+                document.getElementById('response').innerText = error.message;
+            }
+        }
+    </script>
+</body>
+</html>
