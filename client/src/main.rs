@@ -1,10 +1,10 @@
+use libc::*;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::mem;
-use std::ptr;
 use std::os::unix::io::RawFd;
+use std::ptr;
 use std::thread;
-use libc::*;
 
 struct Socket {
     fd: RawFd,
@@ -23,10 +23,16 @@ impl Socket {
             sin_zero: [0; 8],
         };
         let res = unsafe {
-            connect(sock, &addr as *const _ as *const sockaddr, mem::size_of::<sockaddr_in>() as u32)
+            connect(
+                sock,
+                &addr as *const _ as *const sockaddr,
+                mem::size_of::<sockaddr_in>() as u32,
+            )
         };
         if res < 0 {
-            unsafe { close(sock); }
+            unsafe {
+                close(sock);
+            }
             return Err(io::Error::last_os_error());
         }
         Ok(Socket { fd: sock })
@@ -37,31 +43,51 @@ impl io::Write for Socket {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         unsafe {
             let res = libc::write(self.fd, buf.as_ptr() as *const _, buf.len());
-            if res < 0 { Err(io::Error::last_os_error()) } else { Ok(res as usize) }
+            if res < 0 {
+                Err(io::Error::last_os_error())
+            } else {
+                Ok(res as usize)
+            }
         }
     }
-    fn flush(&mut self) -> io::Result<()> { Ok(()) }
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
 }
 
 impl io::Read for Socket {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         unsafe {
             let res = libc::read(self.fd, buf.as_mut_ptr() as *mut _, buf.len());
-            if res < 0 { Err(io::Error::last_os_error()) } else { Ok(res as usize) }
+            if res < 0 {
+                Err(io::Error::last_os_error())
+            } else {
+                Ok(res as usize)
+            }
         }
     }
 }
 
 impl Drop for Socket {
     fn drop(&mut self) {
-        unsafe { close(self.fd); }
+        unsafe {
+            close(self.fd);
+        }
     }
 }
 
 // send_request_forward: target 서버(ip, port)로 메서드와 body를 포함한 요청을 보냅니다.
-fn send_request_forward(method: &str, request_body: &str, target_ip: &str, target_port: u16, target_path: &str) -> io::Result<String> {
+fn send_request_forward(
+    method: &str,
+    request_body: &str,
+    target_ip: &str,
+    target_port: u16,
+    target_path: &str,
+) -> io::Result<String> {
     // 입력받은 target_ip 문자열을 Ipv4Addr로 파싱
-    let ip_addr: std::net::Ipv4Addr = target_ip.parse().map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    let ip_addr: std::net::Ipv4Addr = target_ip
+        .parse()
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
     let ip_u32 = u32::from(ip_addr);
     let mut socket = Socket::connect(ip_u32, target_port)?;
     let mut req = format!(
@@ -105,8 +131,8 @@ fn handle_client(client_fd: RawFd) {
             // 기본 목표 서버 정보 및 기본 path 값
             let mut target_ip = "127.0.0.1";
             let mut target_port = 8080;
-            let mut target_path = "/";  // default
-            
+            let mut target_path = "/"; // default
+
             if let Some(qmark) = full_path.find('?') {
                 // full_path의 "?" 이전은 경로 (예: "/send")
                 let _ = &full_path[..qmark]; // 사용하지 않음
@@ -120,29 +146,46 @@ fn handle_client(client_fd: RawFd) {
                                 if let Ok(p) = kv[1].parse::<u16>() {
                                     target_port = p;
                                 }
-                            },
+                            }
                             "path" => target_path = kv[1],
-                            _ => {},
+                            _ => {}
                         }
                     }
                 }
             }
             // 아래 path가 "/send" 인 경우에만 타겟 서버로 요청 전달
             if full_path.starts_with("/send") {
-                let body = request.split("\r\n\r\n").nth(1).unwrap_or("");
-                match send_request_forward(method, body, target_ip, target_port, target_path) {
-                    Ok(response) => {
-                        let header = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", response.len());
-                        let _ = write(client_fd, header.as_ptr() as *const _, header.len());
-                        if method != "HEAD" {
-                            let _ = write(client_fd, response.as_ptr() as *const _, response.len());
+                if method == "OPTIONS" {
+                    let response = "HTTP/1.1 204 No Content\r\n\
+                                    Access-Control-Allow-Origin: *\r\n\
+                                    Access-Control-Allow-Methods: GET, POST, PUT, HEAD, OPTIONS\r\n\
+                                    Access-Control-Allow-Headers: Content-Type\r\n\
+                                    Content-Length: 0\r\n\
+                                    Connection: close\r\n\r\n";
+                    let _ = write(client_fd, response.as_ptr() as *const _, response.len());
+                } else {
+                    let body = request.split("\r\n\r\n").nth(1).unwrap_or("");
+                    match send_request_forward(method, body, target_ip, target_port, target_path) {
+                        Ok(response) => {
+                            let header = format!(
+                                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n",
+                                response.len()
+                            );
+                            let _ = write(client_fd, header.as_ptr() as *const _, header.len());
+                            if method != "HEAD" {
+                                let _ =
+                                    write(client_fd, response.as_ptr() as *const _, response.len());
+                            }
                         }
-                    },
-                    Err(e) => {
-                        let body = format!("연결 오류: {}", e);
-                        let header = format!("HTTP/1.1 500 Internal Server Error\r\nContent-Length: {}\r\n\r\n", body.len());
-                        let _ = write(client_fd, header.as_ptr() as *const _, header.len());
-                        let _ = write(client_fd, body.as_ptr() as *const _, body.len());
+                        Err(e) => {
+                            let body = format!("연결 오류: {}", e);
+                            let header = format!(
+                                "HTTP/1.1 500 Internal Server Error\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n",
+                                body.len()
+                            );
+                            let _ = write(client_fd, header.as_ptr() as *const _, header.len());
+                            let _ = write(client_fd, body.as_ptr() as *const _, body.len());
+                        }
                     }
                 }
             } else if request.starts_with("GET / ") {
@@ -150,26 +193,29 @@ fn handle_client(client_fd: RawFd) {
                 match fs::read_to_string("index.html") {
                     Ok(content) => {
                         let header = format!(
-                            "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\n\r\n", 
+                            "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\n\r\n",
                             content.len()
                         );
                         let _ = write(client_fd, header.as_ptr() as *const _, header.len());
                         let _ = write(client_fd, content.as_ptr() as *const _, content.len());
-                    },
+                    }
                     Err(e) => {
                         let body = format!("index.html 파일 읽기 오류: {}", e);
-                        let header = format!("HTTP/1.1 500 Internal Server Error\r\nContent-Length: {}\r\n\r\n", body.len());
+                        let header = format!(
+                            "HTTP/1.1 500 Internal Server Error\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\n\r\n",
+                            body.len()
+                        );
                         let _ = write(client_fd, header.as_ptr() as *const _, header.len());
                         let _ = write(client_fd, body.as_ptr() as *const _, body.len());
                     }
                 }
             } else {
                 // 지원하지 않는 요청
-                let response = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
+                let response = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nAccess-Control-Allow-Origin: *\r\n\r\n";
                 let _ = write(client_fd, response.as_ptr() as *const _, response.len());
             }
         } else {
-            let response = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n";
+            let response = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nAccess-Control-Allow-Origin: *\r\n\r\n";
             let _ = write(client_fd, response.as_ptr() as *const _, response.len());
         }
         close(client_fd);
@@ -196,7 +242,9 @@ fn main() -> io::Result<()> {
         let addr = sockaddr_in {
             sin_family: AF_INET as u16,
             sin_port: (8081 as u16).to_be(),
-            sin_addr: in_addr { s_addr: htonl(0x7F000001) },
+            sin_addr: in_addr {
+                s_addr: htonl(0x7F000001),
+            },
             sin_zero: [0; 8],
         };
         let ret = bind(
@@ -212,9 +260,9 @@ fn main() -> io::Result<()> {
             close(server_fd);
             return Err(io::Error::last_os_error());
         }
-        
+
         println!("웹 서버가 http://127.0.0.1:8081 에서 시작되었습니다.");
-        
+
         loop {
             // 클라이언트 연결 수락 (client address는 사용하지 않음)
             let client_fd = accept(server_fd, ptr::null_mut(), ptr::null_mut());
@@ -223,7 +271,9 @@ fn main() -> io::Result<()> {
                 continue;
             }
             // 별도 스레드에서 연결 처리
-            thread::spawn(move || { handle_client(client_fd); });
+            thread::spawn(move || {
+                handle_client(client_fd);
+            });
         }
     }
 }
