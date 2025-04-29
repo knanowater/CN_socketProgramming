@@ -120,8 +120,10 @@
                 const requestBody = document.getElementById("requestBody");
                 if (method === "GET" || method === "HEAD") {
                     pathInput.disabled = false;
+                    requestBody.value = "";
                     requestBody.disabled = true;
                 } else if (method === "POST" || method === "PUT") {
+                    pathInput.value = "";
                     pathInput.disabled = true;
                     requestBody.disabled = false;
                 }
